@@ -1,5 +1,5 @@
 # Node modules
-/frontend/node_modules/
+/ASTEROID-VIZ/node_modules/
 
 # Build output
 dist/
