@@ -1,51 +1,50 @@
 import React, { useRef, useState, useEffect } from "react";
 import Globe from "react-globe.gl";
 
-// Backend now handles CSV parsing and orbital calculations
+// Fetch asteroid data from backend /load_data endpoint
 export default function AsteroidVisualiser3D() {
   const globeRef = useRef();
   const [asteroids, setAsteroids] = useState([]);
   const [selectedAsteroid, setSelectedAsteroid] = useState(null);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  // ---- Upload CSV and send to Flask backend ----
-  const handleCsvUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+  // ---- Fetch asteroid data from backend ----
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch("http://127.0.0.1:8000/load_data");
+        if (!res.ok) throw new Error(`Backend error: ${res.statusText}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
 
-    const formData = new FormData();
-    formData.append("file", file);
+        const asteroidData = data.results.map((r, idx) => ({
+          id: idx,
+          name: r.asteroid || `Asteroid ${idx + 1}`,
+          orbit: r.orbit || [],
+          impact: r.impact,
+          population: r.population,
+        }));
+        setAsteroids(asteroidData);
+      } catch (err) {
+        console.error("Error loading asteroid data:", err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    try {
-      setError(null);
-      const response = await fetch("http://127.0.0.1:8000/upload", {
-        method: "POST",
-        body: formData,
-      });
-      if (!response.ok) throw new Error("Failed to upload or process CSV");
+    fetchData();
+  }, []);
 
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-
-      const asteroidData = data.results.map((r, idx) => ({
-        id: idx,
-        name: r.asteroid || `Asteroid ${idx + 1}`,
-        orbit: r.orbit || [],
-        impact: r.impact,
-        population: r.population,
-      }));
-      setAsteroids(asteroidData);
-    } catch (err) {
-      console.error(err);
-      setError(err.message);
-    }
-  };
-
+  // ---- Handle asteroid selection ----
   const handleAsteroidSelect = (event) => {
     const selected = asteroids.find((a) => a.name === event.target.value);
-    setSelectedAsteroid(selected);
+    setSelectedAsteroid(selected || null);
   };
 
+  // ---- Focus globe on selected asteroid ----
   useEffect(() => {
     if (selectedAsteroid && selectedAsteroid.orbit.length > 0) {
       const firstPoint = selectedAsteroid.orbit[0];
@@ -56,21 +55,32 @@ export default function AsteroidVisualiser3D() {
     }
   }, [selectedAsteroid]);
 
-  const orbitLines = asteroids.flatMap((a) =>
-    a.orbit.length > 1
+  // ---- Prepare orbit visualization only for selected asteroid ----
+  const orbitLines =
+    selectedAsteroid && selectedAsteroid.orbit.length > 1
       ? [
           {
-            name: a.name,
-            color: a.name === selectedAsteroid?.name ? "red" : "lightblue",
-            path: a.orbit.map((p) => [p.lat, p.lng]),
+            name: selectedAsteroid.name,
+            color: "red",
+            path: selectedAsteroid.orbit.map((p) => [p.lat, p.lng]),
           },
         ]
-      : []
-  );
+      : [];
+
+  const pointData =
+    selectedAsteroid && selectedAsteroid.orbit.length > 0
+      ? [
+          {
+            lat: selectedAsteroid.orbit[0].lat,
+            lng: selectedAsteroid.orbit[0].lng,
+            color: "red",
+          },
+        ]
+      : [];
 
   return (
     <div style={{ height: "100vh", width: "100vw", background: "#000" }}>
-      {/* Header with Upload + Selection */}
+      {/* Header controls */}
       <div
         style={{
           position: "absolute",
@@ -86,7 +96,6 @@ export default function AsteroidVisualiser3D() {
           gap: "10px",
         }}
       >
-        <input type="file" accept=".csv" onChange={handleCsvUpload} />
         <select onChange={handleAsteroidSelect} style={{ color: "#000" }}>
           <option>Select asteroid</option>
           {asteroids.map((a) => (
@@ -95,6 +104,7 @@ export default function AsteroidVisualiser3D() {
             </option>
           ))}
         </select>
+        {loading && <span style={{ color: "yellow" }}>Loading data...</span>}
         {error && <span style={{ color: "red" }}>Error: {error}</span>}
       </div>
 
@@ -135,7 +145,7 @@ export default function AsteroidVisualiser3D() {
         </div>
       )}
 
-      {/* 3D Globe Visualization */}
+      {/* 3D Globe visualization - only selected asteroid */}
       <Globe
         ref={globeRef}
         globeImageUrl="//unpkg.com/three-globe/example/img/earth-day.jpg"
@@ -144,14 +154,10 @@ export default function AsteroidVisualiser3D() {
         arcDashLength={0.5}
         arcDashGap={0.01}
         arcDashAnimateTime={3000}
-        pointsData={asteroids.map((a) => ({
-          lat: a.orbit[0]?.lat || 0,
-          lng: a.orbit[0]?.lng || 0,
-          color: a.name === selectedAsteroid?.name ? "red" : "blue",
-        }))}
+        pointsData={pointData}
         pointColor={(d) => d.color}
         pointAltitude={0.01}
-        pointRadius={0.5}
+        pointRadius={0.6}
       />
     </div>
   );

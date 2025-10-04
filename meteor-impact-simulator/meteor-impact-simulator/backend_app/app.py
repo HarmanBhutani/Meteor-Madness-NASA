@@ -1,40 +1,50 @@
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify
 from flask_cors import CORS
-import io
 import pandas as pd
+import traceback
 from compute.orbit import compute_orbit_points
 from compute.impact import compute_impact_energy
 from compute.population import estimate_population_risk
 from db import db, Simulation
 from cache import cache
+import os
 
 app = Flask(__name__)
-CORS(app)  # enable cross-origin access for React frontend
+CORS(app)
 
+# SQLite for local dev
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///meteor.db"
 db.init_app(app)
 
 with app.app_context():
     db.create_all()
 
-# ----------------- Upload CSV -----------------
-@app.route("/upload", methods=["POST"])
-def upload_csv():
+
+@app.route("/load_data", methods=["GET"])
+def load_data():
+    """
+    Reads the asteroid CSV directly from the backend /resources folder.
+    No upload required.
+    """
     try:
-        if "file" not in request.files:
-            return jsonify({"error": "No file provided"}), 400
+        csv_path = os.path.join(os.path.dirname(__file__), "resources", "asteroids.csv")
+        if not os.path.exists(csv_path):
+            return jsonify({"error": f"File not found: {csv_path}"}), 404
 
-        file = request.files["file"]
-        if not file.filename.endswith(".csv"):
-            return jsonify({"error": "File must be a CSV"}), 400
+        print(f"✅ Loading local CSV: {csv_path}")
+        df = pd.read_csv(csv_path)
 
-        df = pd.read_csv(io.StringIO(file.stream.read().decode("utf-8")))
+        if df.empty:
+            return jsonify({"error": "CSV file is empty"}), 400
 
-        required_cols = ["a", "e", "i", "om", "w", "q", "ad", "per_y",
-                         "data_arc", "condition_code", "n_obs_used",
-                         "n_del_obs_used", "n_dop_obs_used", "H"]
-        if not all(c in df.columns for c in required_cols):
-            return jsonify({"error": "Missing required columns"}), 400
+        required_cols = [
+            "a", "e", "i", "om", "w", "q", "ad", "per_y",
+            "data_arc", "condition_code", "n_obs_used",
+            "n_del_obs_used", "n_dop_obs_used", "H"
+        ]
+        missing = [c for c in required_cols if c not in df.columns]
+        if missing:
+            return jsonify({"error": f"Missing required columns: {missing}"}), 400
 
         results = []
         for _, row in df.iterrows():
@@ -63,8 +73,8 @@ def upload_csv():
                 "impact": impact,
                 "population": population
             }
-
             cache.set(cache_key, output)
+            results.append(output)
 
             sim = Simulation(
                 name=asteroid.get("full_name", "Unknown"),
@@ -75,22 +85,26 @@ def upload_csv():
                 population=population.get("population", "unknown")
             )
             db.session.add(sim)
-            results.append(output)
 
         db.session.commit()
         return jsonify({"results": results, "count": len(results)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
-# ----------------- History Endpoint -----------------
+    except Exception as e:
+        print("❌ Exception in /load_data:")
+        traceback.print_exc()
+        return jsonify({"error": f"Internal error: {str(e)}"}), 500
+
+
 @app.route("/history", methods=["GET"])
 def get_history():
     sims = Simulation.query.order_by(Simulation.timestamp.desc()).limit(20).all()
     return jsonify([s.as_dict() for s in sims])
 
+
 @app.route("/ping")
 def ping():
     return {"status": "backend alive"}, 200
 
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000)
+    app.run(host="0.0.0.0", port=8000, debug=True)
