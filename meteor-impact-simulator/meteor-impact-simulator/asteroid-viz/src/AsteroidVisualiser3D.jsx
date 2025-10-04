@@ -1,13 +1,27 @@
 import React, { useRef, useState, useEffect } from "react";
 import Globe from "react-globe.gl";
+import * as THREE from "three";
 
-// Fetch asteroid data from backend /load_data endpoint
 export default function AsteroidVisualiser3D() {
   const globeRef = useRef();
   const [asteroids, setAsteroids] = useState([]);
   const [selectedAsteroid, setSelectedAsteroid] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [currentPosition, setCurrentPosition] = useState(null);
+  const [animationId, setAnimationId] = useState(null);
+  const [asteroidTexture, setAsteroidTexture] = useState(null);
+
+  // ---- Load asteroid texture ----
+  useEffect(() => {
+    const loader = new THREE.TextureLoader();
+    loader.load(
+      "/resources/asteroid-icon.png",
+      (texture) => setAsteroidTexture(texture),
+      undefined,
+      (err) => console.error("Failed to load asteroid icon:", err)
+    );
+  }, []);
 
   // ---- Fetch asteroid data from backend ----
   useEffect(() => {
@@ -34,53 +48,88 @@ export default function AsteroidVisualiser3D() {
         setLoading(false);
       }
     };
-
     fetchData();
   }, []);
 
   // ---- Handle asteroid selection ----
-  const handleAsteroidSelect = (event) => {
-    const selected = asteroids.find((a) => a.name === event.target.value);
+  const handleAsteroidSelect = (e) => {
+    const selected = asteroids.find((a) => a.name === e.target.value);
     setSelectedAsteroid(selected || null);
+    setCurrentPosition(null);
+    if (animationId) cancelAnimationFrame(animationId);
   };
 
-  // ---- Focus globe on selected asteroid ----
+  // ---- Animate asteroid ----
+  useEffect(() => {
+    if (!selectedAsteroid || selectedAsteroid.orbit.length === 0) return;
+
+    const orbit = selectedAsteroid.orbit;
+    let index = 0;
+    let lastTime = 0;
+    const stepDelay = 100; // ms between steps
+
+    const animate = (time) => {
+      if (!lastTime || time - lastTime >= stepDelay) {
+        setCurrentPosition({
+          lat: orbit[index].lat,
+          lng: orbit[index].lng,
+        });
+        index = (index + 1) % orbit.length;
+        lastTime = time;
+      }
+      const frame = requestAnimationFrame(animate);
+      setAnimationId(frame);
+    };
+
+    const frame = requestAnimationFrame(animate);
+    setAnimationId(frame);
+    return () => cancelAnimationFrame(frame);
+  }, [selectedAsteroid]);
+
+  // ---- Center globe on asteroid ----
   useEffect(() => {
     if (selectedAsteroid && selectedAsteroid.orbit.length > 0) {
-      const firstPoint = selectedAsteroid.orbit[0];
+      const first = selectedAsteroid.orbit[0];
       globeRef.current.pointOfView(
-        { lat: firstPoint.lat, lng: firstPoint.lng, altitude: 2 },
+        { lat: first.lat, lng: first.lng, altitude: 2 },
         2000
       );
     }
   }, [selectedAsteroid]);
 
-  // ---- Prepare orbit visualization only for selected asteroid ----
+  // ---- Orbit line ----
   const orbitLines =
     selectedAsteroid && selectedAsteroid.orbit.length > 1
       ? [
           {
             name: selectedAsteroid.name,
-            color: "red",
+            color: "lightblue",
             path: selectedAsteroid.orbit.map((p) => [p.lat, p.lng]),
           },
         ]
       : [];
 
-  const pointData =
-    selectedAsteroid && selectedAsteroid.orbit.length > 0
-      ? [
-          {
-            lat: selectedAsteroid.orbit[0].lat,
-            lng: selectedAsteroid.orbit[0].lng,
-            color: "red",
-          },
-        ]
-      : [];
+  // ---- Custom sprite layer for asteroid icon ----
+  const customLayer = [];
+  if (currentPosition && asteroidTexture) {
+    customLayer.push({
+      lat: currentPosition.lat,
+      lng: currentPosition.lng,
+      obj: (() => {
+        const spriteMat = new THREE.SpriteMaterial({
+          map: asteroidTexture,
+          transparent: true,
+        });
+        const sprite = new THREE.Sprite(spriteMat);
+        sprite.scale.set(10, 10, 1); // adjust icon size
+        return sprite;
+      })(),
+    });
+  }
 
   return (
     <div style={{ height: "100vh", width: "100vw", background: "#000" }}>
-      {/* Header controls */}
+      {/* Header */}
       <div
         style={{
           position: "absolute",
@@ -104,11 +153,11 @@ export default function AsteroidVisualiser3D() {
             </option>
           ))}
         </select>
-        {loading && <span style={{ color: "yellow" }}>Loading data...</span>}
+        {loading && <span style={{ color: "yellow" }}>Loading...</span>}
         {error && <span style={{ color: "red" }}>Error: {error}</span>}
       </div>
 
-      {/* Info panel for selected asteroid */}
+      {/* Info panel */}
       {selectedAsteroid && (
         <div
           style={{
@@ -145,7 +194,7 @@ export default function AsteroidVisualiser3D() {
         </div>
       )}
 
-      {/* 3D Globe visualization - only selected asteroid */}
+      {/* Globe with orbit line + custom sprite asteroid */}
       <Globe
         ref={globeRef}
         globeImageUrl="//unpkg.com/three-globe/example/img/earth-day.jpg"
@@ -154,10 +203,16 @@ export default function AsteroidVisualiser3D() {
         arcDashLength={0.5}
         arcDashGap={0.01}
         arcDashAnimateTime={3000}
-        pointsData={pointData}
-        pointColor={(d) => d.color}
-        pointAltitude={0.01}
-        pointRadius={0.6}
+        customLayerData={customLayer}
+        customThreeObject={(d) => d.obj}
+        customThreeObjectUpdate={(obj, d) => {
+          const phi = (90 - d.lat) * (Math.PI / 180);
+          const theta = (180 - d.lng) * (Math.PI / 180);
+          const radius = globeRef.current.getGlobeRadius() + 0.02 * globeRef.current.getGlobeRadius();
+          obj.position.x = radius * Math.sin(phi) * Math.cos(theta);
+          obj.position.y = radius * Math.cos(phi);
+          obj.position.z = radius * Math.sin(phi) * Math.sin(theta);
+        }}
       />
     </div>
   );
