@@ -11,15 +11,12 @@ export default function AsteroidVisualiser3D() {
   const [currentPosition, setCurrentPosition] = useState(null);
   const [asteroidTexture, setAsteroidTexture] = useState(null);
 
-  // Normalize longitude (-180..180)
   const normalizeLng = (lng) => ((lng + 540) % 360) - 180;
 
-  // Load asteroid icon
   useEffect(() => {
     new THREE.TextureLoader().load("/resources/asteroid-icon.png", setAsteroidTexture);
   }, []);
 
-  // Fetch asteroid data from backend
   const fetchData = async (endpoint) => {
     try {
       setLoading(true);
@@ -51,7 +48,6 @@ export default function AsteroidVisualiser3D() {
     setCurrentPosition(null);
   };
 
-  // Animate asteroid orbit
   useEffect(() => {
     if (!selectedAsteroid || selectedAsteroid.orbit.length === 0) return;
     const orbit = selectedAsteroid.orbit;
@@ -69,30 +65,17 @@ export default function AsteroidVisualiser3D() {
     requestAnimationFrame(animate);
   }, [selectedAsteroid]);
 
-  // Focus camera on impact coordinates
   useEffect(() => {
     if (selectedAsteroid?.impact?.impact && globeRef.current) {
-      const rawLat = selectedAsteroid.impact.lat;
-      const rawLng = selectedAsteroid.impact.lng;
-      console.log("Impact data from backend:", selectedAsteroid.impact);
-
-      // --- Temporary fallback for missing data ---
-      const lat = rawLat && rawLat !== 0 ? rawLat : 37.7749; // Default: San Francisco
-      const lng = rawLng && rawLng !== 0 ? rawLng : -122.4194;
+      const { lat, lng } = selectedAsteroid.impact;
       const normLng = normalizeLng(lng);
-
       globeRef.current.controls().autoRotate = false;
-      const zoomToImpact = () => {
+      setTimeout(() => {
         globeRef.current.pointOfView({ lat, lng: normLng, altitude: 0.25 }, 2500);
-        setTimeout(() => {
-          globeRef.current.pointOfView({ lat, lng: normLng, altitude: 0.22 }, 1200);
-        }, 2600);
-      };
-      setTimeout(zoomToImpact, 800);
+      }, 800);
     }
   }, [selectedAsteroid]);
 
-  // Build orbit arcs
   const makeArcs = (pts, color) =>
     pts.slice(1).map((p, i) => ({
       startLat: pts[i].lat,
@@ -105,7 +88,7 @@ export default function AsteroidVisualiser3D() {
 
   const layers = [];
 
-  // Moving asteroid sprite
+  // --- Moving asteroid ---
   if (currentPosition && asteroidTexture)
     layers.push({
       lat: currentPosition.lat,
@@ -118,107 +101,31 @@ export default function AsteroidVisualiser3D() {
       })(),
     });
 
-  // Impact visuals
+  // --- Impact visualization ---
   if (selectedAsteroid?.impact?.impact) {
-    const rawLat = selectedAsteroid.impact.lat;
-    const rawLng = selectedAsteroid.impact.lng;
-    const lat = rawLat && rawLat !== 0 ? rawLat : 37.7749;
-    const lng = rawLng && rawLng !== 0 ? rawLng : -122.4194;
+    const { lat, lng, population_impacted } = selectedAsteroid.impact;
     const normLng = normalizeLng(lng);
 
-    // crater bowl
+    // Color intensity by impacted population
+    let craterColor = "#ffaa00";
+    if (population_impacted > 1000000) craterColor = "#ff3300";
+    else if (population_impacted > 100000) craterColor = "#ff6600";
+    else craterColor = "#ffcc33";
+
     layers.push({
       lat,
       lng: normLng,
       obj: (() => {
-        const geo = new THREE.SphereGeometry(2.5, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2);
+        const geo = new THREE.SphereGeometry(2.5, 32, 32);
         const mat = new THREE.MeshPhongMaterial({
-          color: "#ffb366",
-          emissive: "#ff6600",
-          emissiveIntensity: 0.6,
-          shininess: 120,
+          color: craterColor,
+          emissive: craterColor,
+          emissiveIntensity: 0.7,
           transparent: true,
           opacity: 0.9,
         });
         const crater = new THREE.Mesh(geo, mat);
-        crater.rotation.x = Math.PI / 2;
         return crater;
-      })(),
-    });
-
-    // red pulsing epicenter
-    layers.push({
-      lat,
-      lng: normLng,
-      obj: (() => {
-        const mat = new THREE.MeshBasicMaterial({
-          color: "red",
-          transparent: true,
-          opacity: 0.95,
-        });
-        const core = new THREE.Mesh(new THREE.SphereGeometry(0.8, 16, 16), mat);
-        let grow = true;
-        const pulse = () => {
-          core.scale.x += grow ? 0.02 : -0.02;
-          core.scale.y += grow ? 0.02 : -0.02;
-          core.scale.z += grow ? 0.02 : -0.02;
-          if (core.scale.x > 1.3) grow = false;
-          if (core.scale.x < 1.0) grow = true;
-          requestAnimationFrame(pulse);
-        };
-        pulse();
-        return core;
-      })(),
-    });
-
-    // explosion flash
-    layers.push({
-      lat,
-      lng: normLng,
-      obj: (() => {
-        const mat = new THREE.MeshBasicMaterial({
-          color: "#ff9933",
-          transparent: true,
-          opacity: 0.6,
-          side: THREE.DoubleSide,
-        });
-        const flash = new THREE.Mesh(new THREE.SphereGeometry(1.2, 32, 32), mat);
-        let size = 1.2;
-        const animate = () => {
-          size += 0.05;
-          flash.scale.set(size, size, size);
-          flash.material.opacity -= 0.008;
-          if (flash.material.opacity > 0.05) requestAnimationFrame(animate);
-        };
-        animate();
-        return flash;
-      })(),
-    });
-
-    // glowing rim pulse
-    layers.push({
-      lat,
-      lng: normLng,
-      obj: (() => {
-        const geo = new THREE.RingGeometry(1.8, 2.6, 64);
-        const mat = new THREE.MeshBasicMaterial({
-          color: "#ffaa00",
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.8,
-        });
-        const ring = new THREE.Mesh(geo, mat);
-        ring.rotation.x = -Math.PI / 2;
-        let expand = true;
-        const pulse = () => {
-          ring.scale.x += expand ? 0.007 : -0.007;
-          ring.scale.y += expand ? 0.007 : -0.007;
-          if (ring.scale.x > 1.12) expand = false;
-          if (ring.scale.x < 1.0) expand = true;
-          requestAnimationFrame(pulse);
-        };
-        pulse();
-        return ring;
       })(),
     });
   }
@@ -276,34 +183,49 @@ export default function AsteroidVisualiser3D() {
             <>
               <p style={{ color: "red" }}>Impact detected at Earth!</p>
               <p>
-                <strong>Latitude:</strong>{" "}
-                {(selectedAsteroid.impact.lat || 37.7749).toFixed(3)}°
-                <br />
-                <strong>Longitude:</strong>{" "}
-                {normalizeLng(selectedAsteroid.impact.lng || -122.4194).toFixed(3)}°
+                <strong>Latitude:</strong> {selectedAsteroid.impact.lat?.toFixed(3)}°<br />
+                <strong>Longitude:</strong> {normalizeLng(selectedAsteroid.impact.lng)?.toFixed(3)}°
+              </p>
+
+              <p>
+                <strong>Crater diameter:</strong>{" "}
+                {selectedAsteroid.impact?.crater_diameter_m
+                  ? selectedAsteroid.impact.crater_diameter_m.toFixed(0) + " m"
+                  : "N/A"}
+              </p>
+
+              <p>
+                <strong>Energy:</strong>{" "}
+                {selectedAsteroid.impact?.energy_tnt_tons
+                  ? selectedAsteroid.impact.energy_tnt_tons.toExponential(3) + " tons TNT"
+                  : "N/A"}
+              </p>
+
+              <p>
+                <strong>Seismic equivalent:</strong>{" "}
+                {selectedAsteroid.impact?.equivalent_magnitude
+                  ? selectedAsteroid.impact.equivalent_magnitude + " Mw"
+                  : "N/A"}
+              </p>
+
+              {/* ✅ Added population stats */}
+              <p>
+                <strong>Population near impact:</strong>{" "}
+                {selectedAsteroid.impact?.population_estimate
+                  ? selectedAsteroid.impact.population_estimate.toLocaleString()
+                  : "Unavailable"}
+              </p>
+
+              <p>
+                <strong>Population impacted (within 100 km):</strong>{" "}
+                {selectedAsteroid.impact?.population_impacted
+                  ? selectedAsteroid.impact.population_impacted.toLocaleString()
+                  : "Unavailable"}
               </p>
             </>
           ) : (
             <p>No impact detected.</p>
           )}
-          <p>
-            Crater diameter:{" "}
-            {selectedAsteroid.impact?.crater_diameter_m
-              ? selectedAsteroid.impact.crater_diameter_m.toFixed(0) + " m"
-              : "N/A"}
-          </p>
-          <p>
-            Energy:{" "}
-            {selectedAsteroid.impact?.energy_tnt_tons
-              ? selectedAsteroid.impact.energy_tnt_tons.toExponential(3) + " tons TNT"
-              : "N/A"}
-          </p>
-          <p>
-            Seismic equivalent:{" "}
-            {selectedAsteroid.impact?.equivalent_magnitude
-              ? selectedAsteroid.impact.equivalent_magnitude + " Mw"
-              : "N/A"}
-          </p>
         </div>
       )}
 
@@ -329,12 +251,10 @@ export default function AsteroidVisualiser3D() {
         Harman Bhutani
       </div>
 
-      {/* Lighting */}
       <ambientLight intensity={2.0} />
       <directionalLight position={[5, 3, 5]} intensity={2.3} color="#ffffff" />
       <pointLight position={[0, 0, 5]} intensity={1.8} color="#ffd27f" />
 
-      {/* Globe */}
       <Globe
         ref={globeRef}
         globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"

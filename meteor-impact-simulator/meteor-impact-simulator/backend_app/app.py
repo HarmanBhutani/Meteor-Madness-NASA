@@ -3,17 +3,56 @@ from flask_cors import CORS
 import pandas as pd
 import numpy as np
 from math import radians, cos, sin, log10
-import os, traceback, requests
+import os, traceback, requests, math
 
 app = Flask(__name__)
 CORS(app)
 
-
-EARTH_RADIUS_AU = 0.001  
-NASA_API_KEY = "GlCgPEjdbrNETSZZht2yqrHTko5ip7BdOe1Uo97H"              
+EARTH_RADIUS_AU = 0.001
+NASA_API_KEY = "GlCgPEjdbrNETSZZht2yqrHTko5ip7BdOe1Uo97H"
 NASA_NEO_URL = "https://api.nasa.gov/neo/rest/v1/neo/browse"
 USGS_QUAKE_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query"
 
+# =====================================================================
+# POPULATION ESTIMATION (API NINJAS)
+# =====================================================================
+def get_population_near(lat, lng):
+    """
+    Estimate population near the given lat/lng using API Ninjas City endpoint.
+    Requires free API key from https://api-ninjas.com/api/city
+    """
+    try:
+        url = f"https://api.api-ninjas.com/v1/city?lat={lat}&lon={lng}"
+        headers = {"X-Api-Key": "pjCCAOcXtWjbU8D6m8A5XA==VdQxSGB3E21AtNDn"}  # replace with your key
+        res = requests.get(url, headers=headers, timeout=10)
+
+        if res.status_code == 200:
+            data = res.json()
+            if isinstance(data, list) and len(data) > 0:
+                city = data[0]
+                pop = city.get("population", 0)
+                area_km2 = city.get("area_km2", 100) or 100
+                density = pop / area_km2  # people/km²
+                return pop, density
+    except Exception as e:
+        print("Population API lookup failed:", e)
+
+    # Fallback global mean population density ~58 people/km²
+    return 0, 58
+
+
+def estimate_population_impacted(lat, lng, crater_diameter_m, density, radius_km=100):
+    """
+    Estimate total population directly impacted within the crater + surrounding radius.
+    crater_diameter_m: crater diameter in meters
+    radius_km: surrounding radius in km (default = 100)
+    density: local population density (people per km²)
+    """
+    crater_radius_km = (crater_diameter_m / 2) / 1000
+    total_radius_km = crater_radius_km + radius_km
+    area_km2 = math.pi * (total_radius_km ** 2)
+    impacted_population = int(density * area_km2)
+    return impacted_population
 
 # =====================================================================
 # ORBITAL MATH
@@ -45,7 +84,9 @@ def estimate_crater(diameter_m, velocity_m_s=20000, density_impactor=3000,
     energy_tnt = energy_j / 4.184e9  # 1 ton TNT = 4.184e9 J
     return Dc, energy_tnt
 
-
+# =====================================================================
+# IMPACT + POPULATION SIMULATION
+# =====================================================================
 def compute_orbit_and_impact(row):
     try:
         a, e, i, om, w = [float(row[k]) for k in ["a", "e", "i", "om", "w"]]
@@ -75,10 +116,16 @@ def compute_orbit_and_impact(row):
             lng = np.degrees(np.arctan2(pos[1], pos[0]))
             orbit_points.append({"lat": lat, "lng": lng})
 
-        crater_diameter = energy_tnt = magnitude_equiv = None
+        crater_diameter = energy_tnt = magnitude_equiv = population_estimate = population_impacted = None
         if hit:
-            crater_diameter, energy_tnt = estimate_crater(diameter_m=120)  # 120 m test asteroid
+            crater_diameter, energy_tnt = estimate_crater(diameter_m=120)  # test asteroid
             magnitude_equiv = round(6.3 + log10(energy_tnt / 1e6), 2)
+
+            # Population estimates
+            population_estimate, density = get_population_near(impact_lat, impact_lng)
+            population_impacted = estimate_population_impacted(
+                impact_lat, impact_lng, crater_diameter, density, 100
+            )
 
         return {
             "asteroid": row.get("full_name", "Unknown"),
@@ -91,13 +138,17 @@ def compute_orbit_and_impact(row):
                 "crater_diameter_m": crater_diameter,
                 "energy_tnt_tons": energy_tnt,
                 "equivalent_magnitude": magnitude_equiv,
+                "population_estimate": population_estimate,
+                "population_impacted": population_impacted,
             },
         }
     except Exception:
         traceback.print_exc()
         return None
 
-
+# =====================================================================
+# ROUTES
+# =====================================================================
 @app.route("/load_data", methods=["GET"])
 def load_data():
     """Local CSV fallback."""
@@ -109,7 +160,6 @@ def load_data():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/fetch_nasa_neo", methods=["GET"])
 def fetch_nasa_neo():
@@ -136,7 +186,6 @@ def fetch_nasa_neo():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/fetch_usgs_quake_equiv", methods=["GET"])
 def fetch_usgs_quake_equiv():
     """Return recent large earthquakes for comparison."""
@@ -151,11 +200,9 @@ def fetch_usgs_quake_equiv():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/ping")
 def ping():
     return {"status": "alive"}, 200
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
