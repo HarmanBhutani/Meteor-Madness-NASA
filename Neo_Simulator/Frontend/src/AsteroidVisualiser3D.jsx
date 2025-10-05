@@ -11,17 +11,74 @@ export default function AsteroidVisualiser3D() {
   const [currentPosition, setCurrentPosition] = useState(null);
   const [asteroidTexture, setAsteroidTexture] = useState(null);
   const [showImpactInfo, setShowImpactInfo] = useState(false);
-  const [impactLocation, setImpactLocation] = useState(null);
-
-
 
   const normalizeLng = (lng) => ((lng + 540) % 360) - 180;
+
+  // === Impact Data Calculator ===
+const computeImpactData = (asteroid) => {
+  if (!asteroid || !asteroid.orbit || asteroid.orbit.length === 0) return {};
+
+  const MU_SUN = 1.32712440018e20; // m³/s²
+  const AU_M = 1.495978707e11; // m
+  const V_EARTH = 29.78; // km/s
+
+  // Diameter: prefer provided, else estimate
+  let diameter_m = asteroid.diameter ?? null;
+  if (!diameter_m && asteroid.h != null) {
+    const p = 0.14; // typical albedo
+    diameter_m = (1329 / Math.sqrt(p)) * Math.pow(10, -asteroid.h / 5) * 1000;
+  }
+  if (!diameter_m) diameter_m = 50; // fallback
+
+  const density = asteroid.density ?? 3000;
+
+  // Semi-major axis from orbit data
+  let a_raw = asteroid.a ?? asteroid.semimajoraxis ?? asteroid.semi_major_axis ?? null;
+  if (!a_raw && asteroid.orbit && typeof asteroid.orbit === "object") {
+    a_raw = asteroid.orbit.a ?? asteroid.orbit.semi_major_axis ?? null;
+  }
+  let a_m = a_raw ? Number(a_raw) : AU_M;
+  if (a_m < 1e9) a_m *= 1.496e11; // treat as AU if small
+
+  const r_m = AU_M;
+  let v_ms = Math.sqrt(MU_SUN * (2 / r_m - 1 / a_m));
+  if (!isFinite(v_ms)) v_ms = 20000;
+
+  const mass = (4 / 3) * Math.PI * Math.pow(diameter_m / 2, 3) * density;
+  const energy_j = 0.5 * mass * v_ms ** 2;
+  const energyTNT = energy_j / 4.184e12;
+
+  // Crater diameter (m)
+  const craterDiameter = 1.8 * Math.pow(energy_j, 0.28);
+
+  const populationImpacted = asteroid.impact?.population_impacted || 0;
+  const populationDensity =
+    populationImpacted > 0
+      ? populationImpacted /
+        (Math.PI * Math.pow(craterDiameter / 2 / 1000, 2))
+      : null;
+
+  const impactPosition = asteroid.orbit[asteroid.orbit.length - 1];
+
+  return {
+    velocity: v_ms / 1000,
+    mass,
+    energyTNT,
+    craterDiameter,
+    populationDensity,
+    lat: impactPosition?.lat,
+    lng: impactPosition?.lng,
+  };
+};
+
+
+   
+
+  const impactData = selectedAsteroid ? computeImpactData(selectedAsteroid) : {};
 
   useEffect(() => {
     new THREE.TextureLoader().load("/resources/asteroid-icon.png", setAsteroidTexture);
   }, []);
-  
-
 
   const fetchData = async (endpoint) => {
     try {
@@ -35,8 +92,6 @@ export default function AsteroidVisualiser3D() {
           name: r.asteroid || `Asteroid ${i + 1}`,
           orbit: r.orbit || [],
           impact: r.impact,
-          a: r.a,
-          h: r.h,
           diameter: r.diameter,
           density: r.density,
         }))
@@ -51,40 +106,27 @@ export default function AsteroidVisualiser3D() {
   useEffect(() => {
     fetchData("http://127.0.0.1:8000/load_data");
   }, []);
-  
 
   const handleSelect = (e) => {
     const sel = asteroids.find((a) => a.name === e.target.value);
     setSelectedAsteroid(sel);
     setCurrentPosition(null);
     setShowImpactInfo(false);
-
-    if (globeRef.current) {
-      globeRef.current.pointOfView({ lat: 0, lng: 0, altitude: 2.5 }, 1500);
-    }
+    if (globeRef.current) globeRef.current.pointOfView({ lat: 0, lng: 0, altitude: 2.5 }, 1500);
   };
 
   const simulateImpact = () => {
-  if (!selectedAsteroid || !globeRef.current) return;
-  const orbit = selectedAsteroid.orbit;
-  if (!orbit || orbit.length === 0) return;
+    if (!selectedAsteroid || !globeRef.current) return;
+    const orbit = selectedAsteroid.orbit;
+    if (!orbit || orbit.length === 0) return;
 
-  const impactPosition = orbit[orbit.length - 1];
-  const normLng = normalizeLng(impactPosition.lng);
+    const impactPosition = orbit[orbit.length - 1];
+    const normLng = normalizeLng(impactPosition.lng);
 
-  globeRef.current.controls().autoRotate = false;
-  globeRef.current.pointOfView(
-    { lat: impactPosition.lat, lng: normLng, altitude: 0.25 },
-    2500
-  );
-
-  setShowImpactInfo(true);
-  setImpactLocation({ lat: impactPosition.lat, lng: normLng });
-
-  
-};
-
-  
+    globeRef.current.controls().autoRotate = false;
+    globeRef.current.pointOfView({ lat: impactPosition.lat, lng: normLng, altitude: 0.25 }, 2500);
+    setShowImpactInfo(true);
+  };
 
   const makeArcs = (pts, color) =>
     pts.slice(1).map((p, i) => ({
@@ -95,92 +137,10 @@ export default function AsteroidVisualiser3D() {
       color,
     }));
 
-  // 🧠 New Impact Physics Function
-  const computeImpactData = (asteroid) => {
-    if (!asteroid) return {};
-
-    let a_raw =
-      asteroid.a ??
-      asteroid.semimajoraxis ??
-      asteroid.semi_major_axis ??
-      (asteroid.orbit?.a ?? asteroid.orbit?.semi_major_axis) ??
-      null;
-
-    const AU_M = 1.495978707e11;
-    const MU_SUN = 1.32712440018e20;
-    const V_EARTH = 29.78;
-
-    let a_m = null;
-    if (a_raw != null) {
-      const a_num = Number(a_raw);
-      if (a_num > 1e9) a_m = a_num;
-      else if (a_num > 1000) a_m = a_num * 1000;
-      else a_m = a_num * AU_M;
-    }
-
-    let v_asteroid_ms = 20000;
-    if (a_m) {
-      try {
-        const r_m = AU_M;
-        const v_squared = MU_SUN * (2 / r_m - 1 / a_m);
-        if (v_squared > 0) v_asteroid_ms = Math.sqrt(v_squared);
-      } catch (e) {}
-    }
-
-    const v_asteroid_kms = v_asteroid_ms / 1000;
-    let v_rel_kms = Math.sqrt(
-      v_asteroid_kms ** 2 + V_EARTH ** 2 - 2 * v_asteroid_kms * V_EARTH * Math.cos(Math.random() * Math.PI)
-    );
-
-    if (!isFinite(v_rel_kms) || v_rel_kms <= 0)
-      v_rel_kms = 12 + Math.random() * 25;
-
-    let diameter_m = null;
-    if (asteroid.diameter) {
-      diameter_m = Number(asteroid.diameter);
-      if (diameter_m < 1000) diameter_m *= 1000;
-    } else if (asteroid.h) {
-      const p = 0.14;
-      diameter_m = (1329 / Math.sqrt(p)) * Math.pow(10, -asteroid.h / 5) * 1000;
-    } else {
-      diameter_m = 50 + Math.random() * 950;
-    }
-
-    const density = asteroid.density ?? 2500 + Math.random() * 1500;
-    const mass_kg = (4 / 3) * Math.PI * Math.pow(diameter_m / 2, 3) * density;
-
-    const v_rel_ms = v_rel_kms * 1000;
-    const energy_j = 0.5 * mass_kg * v_rel_ms ** 2;
-    const energy_tnt_tons = energy_j / 4.184e9;
-    const crater_diameter_m = 0.0012 * Math.pow(energy_j, 0.3);
-
-    const lat =
-      asteroid.impact?.lat ??
-      (Array.isArray(asteroid.orbit) && asteroid.orbit.length
-        ? asteroid.orbit[asteroid.orbit.length - 1].lat
-        : null);
-    const lng =
-      asteroid.impact?.lng ??
-      (Array.isArray(asteroid.orbit) && asteroid.orbit.length
-        ? asteroid.orbit[asteroid.orbit.length - 1].lng
-        : null);
-
-    return {
-      velocity_kms: v_rel_kms,
-      mass_kg,
-      energyTNT: energy_tnt_tons,
-      craterDiameter_m: crater_diameter_m,
-      lat,
-      lng,
-    };
-  };
-
-  const impactData = selectedAsteroid ? computeImpactData(selectedAsteroid) : {};
   const fullOrbit = selectedAsteroid ? makeArcs(selectedAsteroid.orbit, "gray") : [];
-
   const layers = [];
 
-  if (currentPosition && asteroidTexture)
+  if (currentPosition && asteroidTexture) {
     layers.push({
       lat: currentPosition.lat,
       lng: normalizeLng(currentPosition.lng),
@@ -191,11 +151,11 @@ export default function AsteroidVisualiser3D() {
         return sprite;
       })(),
     });
+  }
 
   if (selectedAsteroid?.impact?.impact) {
     const { lat, lng, population_impacted } = selectedAsteroid.impact;
     const normLng = normalizeLng(lng);
-
     let craterColor = "#ffaa00";
     if (population_impacted > 1000000) craterColor = "#ff3300";
     else if (population_impacted > 100000) craterColor = "#ff6600";
@@ -220,83 +180,32 @@ export default function AsteroidVisualiser3D() {
 
   return (
     <div style={{ height: "100vh", width: "100vw", background: "#000" }}>
-      {/* Header */}
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          padding: "10px",
-          background: "#111",
-          color: "#fff",
-          zIndex: 2,
-          display: "flex",
-          alignItems: "center",
-          gap: "10px",
-        }}
-      >
-        <button onClick={() => fetchData("http://127.0.0.1:8000/load_data")}>Local CSV</button>
+      <div style={{ position: "absolute", top: 0, left: 0, width: "100%", padding: "10px", background: "#111", color: "#fff", zIndex: 2, display: "flex", alignItems: "center", gap: "10px" }}>
         <select onChange={handleSelect} style={{ color: "#000" }}>
           <option>Select asteroid</option>
           {asteroids.map((a) => (
-            <option key={a.id} value={a.name}>
-              {a.name}
-            </option>
+            <option key={a.id} value={a.name}>{a.name}</option>
           ))}
         </select>
         {selectedAsteroid && (
-          <button
-            onClick={simulateImpact}
-            style={{ background: "#ff3300", color: "#fff" }}
-          >
-            Simulate Impact
+          <button onClick={simulateImpact} style={{ background: "#ff3300", color: "#fff" }}>
+            Simulate Hypothetical Impact
           </button>
         )}
         {loading && <span style={{ color: "yellow" }}>Loading...</span>}
         {error && <span style={{ color: "red" }}>Error: {error}</span>}
       </div>
 
-      {/* Info panel */}
       {selectedAsteroid && (
-        <div
-          style={{
-            position: "absolute",
-            top: 60,
-            left: 20,
-            background: "rgba(0,0,0,0.7)",
-            color: "#0f0",
-            padding: "10px",
-            borderRadius: "8px",
-            zIndex: 2,
-            maxWidth: "360px",
-          }}
-        >
-          {showImpactInfo ? (
+        <div style={{ position: "absolute", top: 60, left: 20, background: "rgba(0,0,0,0.7)", color: "#0f0", padding: "10px", borderRadius: "8px", zIndex: 2, maxWidth: "360px" }}>
+          {selectedAsteroid.impact?.impact || showImpactInfo ? (
             <>
               <p style={{ color: "red" }}>Impact detected at Earth!</p>
-              <strong>Latitude:</strong>{" "}
-              {impactData.lat ? impactData.lat.toFixed(3) : "N/A"}° <br />
-              <strong>Longitude:</strong>{" "}
-              {impactData.lng ? normalizeLng(impactData.lng).toFixed(3) : "N/A"}° <br />
-              <p>
-                <strong>Crater diameter:</strong>{" "}
-                {impactData.craterDiameter_m
-                  ? impactData.craterDiameter_m.toFixed(0) + " m"
-                  : "N/A"}
-              </p>
-              <p>
-                <strong>Energy:</strong>{" "}
-                {impactData.energyTNT
-                  ? impactData.energyTNT.toExponential(3) + " tons TNT"
-                  : "N/A"}
-              </p>
-              <p>
-                <strong>Velocity:</strong>{" "}
-                {impactData.velocity_kms
-                  ? impactData.velocity_kms.toFixed(2) + " km/s"
-                  : "N/A"}
-              </p>
+              <strong>Latitude:</strong> {impactData.lat?.toFixed(3) ?? "N/A"}°<br />
+              <strong>Longitude:</strong> {impactData.lng?.toFixed(3) ?? "N/A"}°<br />
+              <p><strong>Crater diameter:</strong> {impactData.craterDiameter ? impactData.craterDiameter.toFixed(0) + " m" : "N/A"}</p>
+              <p><strong>Energy:</strong> {impactData.energyTNT ? impactData.energyTNT.toExponential(3) + " tons TNT" : "N/A"}</p>
+              <p><strong>Population density:</strong> {impactData.populationDensity ? impactData.populationDensity.toFixed(2) + " people/km²" : "N/A"}</p>
             </>
           ) : (
             <p>No impact detected.</p>
@@ -304,26 +213,8 @@ export default function AsteroidVisualiser3D() {
         </div>
       )}
 
-      {/* Footer */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 10,
-          left: 10,
-          background: "rgba(0,0,0,0.6)",
-          color: "#fff",
-          padding: "8px 12px",
-          borderRadius: "8px",
-          fontSize: "14px",
-          lineHeight: "1.4",
-          zIndex: 2,
-        }}
-      >
-        <strong>Submitted by:-</strong>
-        <br />
-        Gurnoor Singh Wadhwa
-        <br />
-        Harman Bhutani
+      <div style={{ position: "absolute", bottom: 10, left: 10, background: "rgba(0,0,0,0.6)", color: "#fff", padding: "8px 12px", borderRadius: "8px", fontSize: "14px", lineHeight: "1.4", zIndex: 2 }}>
+        <strong>Submitted by:-</strong><br />Gurnoor Singh Wadhwa<br />Harman Bhutani
       </div>
 
       <ambientLight intensity={2.0} />
