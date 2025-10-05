@@ -1,0 +1,28 @@
+# Node modules
+/ASTEROID-VIZ/node_modules/
+
+# Build output
+dist/
+build/
+.cache/
+
+
+../../../.DS_Store
+../../.DS_Store
+
+# Environment variables
+.env
+.env.local
+
+# Logs
+logs/
+*.log
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
