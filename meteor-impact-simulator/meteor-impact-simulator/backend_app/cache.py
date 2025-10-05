@@ -1,6 +1,5 @@
 import json
 
-# Simple in-memory fallback cache for local testing
 _cache = {}
 
 class Cache:

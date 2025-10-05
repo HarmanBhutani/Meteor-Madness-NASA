@@ -8,11 +8,9 @@ import os, traceback, requests
 app = Flask(__name__)
 CORS(app)
 
-# =====================================================================
-# CONFIGURATION
-# =====================================================================
-EARTH_RADIUS_AU = 0.001                     # ~150,000 km visible threshold
-NASA_API_KEY = "DEMO_KEY"                   # get key at https://api.nasa.gov
+
+EARTH_RADIUS_AU = 0.001  
+NASA_API_KEY = "GlCgPEjdbrNETSZZht2yqrHTko5ip7BdOe1Uo97H"              
 NASA_NEO_URL = "https://api.nasa.gov/neo/rest/v1/neo/browse"
 USGS_QUAKE_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query"
 
@@ -31,10 +29,6 @@ def orbital_elements_to_cartesian(a, e, i, om, w, f):
     z = (sin(w)*sin(i))*x_orb + (cos(w)*sin(i))*y_orb
     return np.array([x, y, z])
 
-
-# =====================================================================
-# CRATER SIZE + ENERGY ESTIMATION
-# =====================================================================
 def estimate_crater(diameter_m, velocity_m_s=20000, density_impactor=3000,
                     density_target=2500, gravity=9.81):
     """
@@ -52,11 +46,7 @@ def estimate_crater(diameter_m, velocity_m_s=20000, density_impactor=3000,
     return Dc, energy_tnt
 
 
-# =====================================================================
-# MAIN ORBIT + IMPACT COMPUTATION
-# =====================================================================
 def compute_orbit_and_impact(row):
-    """Compute orbit and detect Earth intersection."""
     try:
         a, e, i, om, w = [float(row[k]) for k in ["a", "e", "i", "om", "w"]]
         orbit_points, hit = [], False
@@ -108,9 +98,6 @@ def compute_orbit_and_impact(row):
         return None
 
 
-# =====================================================================
-# ROUTES
-# =====================================================================
 @app.route("/load_data", methods=["GET"])
 def load_data():
     """Local CSV fallback."""
