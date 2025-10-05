@@ -11,10 +11,8 @@ export default function AsteroidVisualiser3D() {
   const [currentPosition, setCurrentPosition] = useState(null);
   const [asteroidTexture, setAsteroidTexture] = useState(null);
   const [showImpactInfo, setShowImpactInfo] = useState(false);
-  
+  const [impactLocation, setImpactLocation] = useState(null);
 const [showRipple, setShowRipple] = useState(false);
-const [impactLocation, setImpactLocation] = useState(null);
-const [ripples, setRipples] = useState([]);
 
 
 
