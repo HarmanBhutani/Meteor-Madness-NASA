@@ -41,3 +41,29 @@ It combines:
 
 ## ⚙️ Project Structure
 
+├── backend_app/
+│ ├── app.py # Flask backend API
+│ ├── geo.py # Geographic calculations
+│ ├── impact.py # Impact physics & crater model
+│ ├── propagate.py # Orbital propagation
+│ ├── nasa_client.py # NASA NEO API client
+│ ├── requirements.txt # Python dependencies
+│ ├── resources/
+│ │ ├── sample_data.csv # Asteroid dataset
+│ │ └── ...
+│ └── Dockerfile
+│
+├── frontend/
+│ ├── src/
+│ │ ├── AsteroidVisualiser3D.jsx # Main visualization component
+│ │ ├── index.js
+│ │ └── ...
+│ ├── public/
+│ │ ├── resources/
+│ │ │ └── asteroid-icon.png
+│ │ └── index.html
+│ ├── package.json
+│ └── README.md (this file)
+│
+└── docker-compose.yml
+
