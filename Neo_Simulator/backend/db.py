@@ -17,8 +17,6 @@ class Simulation(db.Model):
         return {
             "id": self.id,
             "name": self.name,
-            "latitude": self.latitude,
-            "longitude": self.longitude,
             "energy_tnt": self.energy_tnt,
             "crater_diameter": self.crater_diameter,
             "population": self.population,

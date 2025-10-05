@@ -117,13 +117,20 @@ def compute_orbit_and_impact(row, asteroid_index=0):
             if dist < EARTH_RADIUS_AU:
                 hit = True
                 r_norm = np.linalg.norm(rel)
-                if r_norm == 0:
-                    lat, lng = 0.0, 0.0
-                else:
+                if r_norm != 0:
                     lat = np.degrees(np.arcsin(rel[2] / r_norm))
                     lng = np.degrees(np.arctan2(rel[1], rel[0]))
-                impact_lat, impact_lng = lat, lng
+                    impact_lat, impact_lng = lat, lng
+                else:
+                    impact_lat, impact_lng = 0.0, 0.0
                 break
+            else:
+                if dist == min_dist:
+                    r_norm = np.linalg.norm(rel)
+                    if r_norm != 0:
+                        lat = np.degrees(np.arcsin(rel[2] / r_norm))
+                        lng = np.degrees(np.arctan2(rel[1], rel[0]))
+                        impact_lat, impact_lng = lat, lng
 
             lat = np.degrees(np.arcsin(pos[2] / np.linalg.norm(pos)))
             lng = np.degrees(np.arctan2(pos[1], pos[0]))
@@ -147,8 +154,6 @@ def compute_orbit_and_impact(row, asteroid_index=0):
             "impact": {
                 "impact": hit,
                 "min_distance_AU": None if np.isinf(min_dist) else min_dist,
-                "lat": impact_lat,
-                "lng": impact_lng,
                 "crater_diameter_m": crater_diameter,
                 "energy_tnt_tons": energy_tnt,
                 "equivalent_magnitude": magnitude_equiv,
