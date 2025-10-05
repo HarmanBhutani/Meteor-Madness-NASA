@@ -11,8 +11,8 @@ CORS(app)
 # =====================================================================
 # CONFIGURATION
 # =====================================================================
-EARTH_RADIUS_AU = 0.001                     # visual threshold (~150 000 km)
-NASA_API_KEY = "DEMO_KEY"                   # get your key at https://api.nasa.gov
+EARTH_RADIUS_AU = 0.001                     # ~150,000 km visible threshold
+NASA_API_KEY = "DEMO_KEY"                   # get key at https://api.nasa.gov
 NASA_NEO_URL = "https://api.nasa.gov/neo/rest/v1/neo/browse"
 USGS_QUAKE_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query"
 
@@ -33,10 +33,30 @@ def orbital_elements_to_cartesian(a, e, i, om, w, f):
 
 
 # =====================================================================
-# ORBIT + IMPACT
+# CRATER SIZE + ENERGY ESTIMATION
+# =====================================================================
+def estimate_crater(diameter_m, velocity_m_s=20000, density_impactor=3000,
+                    density_target=2500, gravity=9.81):
+    """
+    Returns (crater_diameter_m, energy_tnt_tons)
+    Uses Holsapple & Schmidt scaling.
+    """
+    k1 = 1.161
+    Dc = k1 * ((gravity * diameter_m) / (velocity_m_s ** 2)) ** (-0.17) * \
+        (density_impactor / density_target) ** 0.333 * diameter_m
+
+    volume = (4 / 3) * np.pi * (diameter_m / 2) ** 3
+    mass = density_impactor * volume
+    energy_j = 0.5 * mass * velocity_m_s ** 2
+    energy_tnt = energy_j / 4.184e9  # 1 ton TNT = 4.184e9 J
+    return Dc, energy_tnt
+
+
+# =====================================================================
+# MAIN ORBIT + IMPACT COMPUTATION
 # =====================================================================
 def compute_orbit_and_impact(row):
-    """Compute orbit and detect intersection with Earth’s orbit."""
+    """Compute orbit and detect Earth intersection."""
     try:
         a, e, i, om, w = [float(row[k]) for k in ["a", "e", "i", "om", "w"]]
         orbit_points, hit = [], False
@@ -65,9 +85,10 @@ def compute_orbit_and_impact(row):
             lng = np.degrees(np.arctan2(pos[1], pos[0]))
             orbit_points.append({"lat": lat, "lng": lng})
 
-        magnitude_equiv = None
+        crater_diameter = energy_tnt = magnitude_equiv = None
         if hit:
-            magnitude_equiv = round(6.3 + log10(1), 2)  # ≈ M 6.3 quake for 1 Mt TNT
+            crater_diameter, energy_tnt = estimate_crater(diameter_m=120)  # 120 m test asteroid
+            magnitude_equiv = round(6.3 + log10(energy_tnt / 1e6), 2)
 
         return {
             "asteroid": row.get("full_name", "Unknown"),
@@ -77,6 +98,8 @@ def compute_orbit_and_impact(row):
                 "min_distance_AU": None if np.isinf(min_dist) else min_dist,
                 "lat": impact_lat,
                 "lng": impact_lng,
+                "crater_diameter_m": crater_diameter,
+                "energy_tnt_tons": energy_tnt,
                 "equivalent_magnitude": magnitude_equiv,
             },
         }
@@ -90,7 +113,7 @@ def compute_orbit_and_impact(row):
 # =====================================================================
 @app.route("/load_data", methods=["GET"])
 def load_data():
-    """Fallback local CSV."""
+    """Local CSV fallback."""
     try:
         csv_path = os.path.join(os.path.dirname(__file__), "resources", "asteroids.csv")
         df = pd.read_csv(csv_path)
@@ -103,7 +126,7 @@ def load_data():
 
 @app.route("/fetch_nasa_neo", methods=["GET"])
 def fetch_nasa_neo():
-    """Fetch live Near-Earth Objects from NASA NEO API."""
+    """Fetch live Near-Earth Objects from NASA API."""
     try:
         params = {"api_key": NASA_API_KEY, "page": 0, "size": 5}
         r = requests.get(NASA_NEO_URL, params=params, timeout=20)
@@ -129,12 +152,13 @@ def fetch_nasa_neo():
 
 @app.route("/fetch_usgs_quake_equiv", methods=["GET"])
 def fetch_usgs_quake_equiv():
-    """Return a few recent large earthquakes (for seismic comparison)."""
+    """Return recent large earthquakes for comparison."""
     try:
         params = {"format": "geojson", "limit": 5, "orderby": "magnitude", "minmagnitude": 6}
         r = requests.get(USGS_QUAKE_URL, params=params, timeout=20)
         feats = r.json().get("features", [])
-        quakes = [{"place": f["properties"]["place"], "mag": f["properties"]["mag"]} for f in feats]
+        quakes = [{"place": f["properties"]["place"], "mag": f["properties"]["mag"]}
+                  for f in feats]
         return jsonify({"recent_large_quakes": quakes})
     except Exception as e:
         traceback.print_exc()
