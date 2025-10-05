@@ -4,6 +4,12 @@ import pandas as pd
 import numpy as np
 from math import radians, cos, sin, log10
 import os, traceback, requests, math
+from astropy import units as u
+from astropy.time import Time
+from poliastro.bodies import Sun, Earth
+from poliastro.twobody import Orbit
+import traceback
+import math
 
 app = Flask(__name__)
 CORS(app)
@@ -87,14 +93,21 @@ def estimate_crater(diameter_m, velocity_m_s=20000, density_impactor=3000,
 # =====================================================================
 # IMPACT + POPULATION SIMULATION
 # =====================================================================
-def compute_orbit_and_impact(row):
+
+
+def compute_orbit_and_impact(row, asteroid_index=0):
     try:
-        a, e, i, om, w = [float(row[k]) for k in ["a", "e", "i", "om", "w"]]
+        a = float(row.get("a", 1.0))
+        e = float(row.get("e", 0.1))
+        i = float(row.get("i", 0.0))
+        om = float(row.get("om", 0.0))
+        w = float(row.get("w", 0.0))
+
         orbit_points, hit = [], False
         impact_lat = impact_lng = None
         min_dist = float("inf")
 
-        for f_deg in range(0, 360, 2):
+        for f_deg in range(0, 360, 5):
             pos = orbital_elements_to_cartesian(a, e, i, om, w, f_deg)
             earth_pos = np.array([cos(radians(f_deg)), sin(radians(f_deg)), 0])
             rel = pos - earth_pos
@@ -116,19 +129,20 @@ def compute_orbit_and_impact(row):
             lng = np.degrees(np.arctan2(pos[1], pos[0]))
             orbit_points.append({"lat": lat, "lng": lng})
 
+        if not orbit_points:
+            orbit_points = [{"lat": 0, "lng": 0}]
+
         crater_diameter = energy_tnt = magnitude_equiv = population_estimate = population_impacted = None
         if hit:
-            crater_diameter, energy_tnt = estimate_crater(diameter_m=120)  # test asteroid
+            crater_diameter, energy_tnt = estimate_crater(diameter_m=120)
             magnitude_equiv = round(6.3 + log10(energy_tnt / 1e6), 2)
-
-            # Population estimates
             population_estimate, density = get_population_near(impact_lat, impact_lng)
             population_impacted = estimate_population_impacted(
                 impact_lat, impact_lng, crater_diameter, density, 100
             )
 
         return {
-            "asteroid": row.get("full_name", "Unknown"),
+            "asteroid": row.get("full_name", row.get("designation", "Unknown")),
             "orbit": orbit_points,
             "impact": {
                 "impact": hit,
@@ -161,48 +175,34 @@ def load_data():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-@app.route("/fetch_nasa_neo", methods=["GET"])
-def fetch_nasa_neo():
-    """Fetch live Near-Earth Objects from NASA API."""
+@app.route("/simulate_impact/<designation>")
+def simulate_impact(designation):
+    """Simulate hypothetical impact for a selected asteroid."""
     try:
-        params = {"api_key": NASA_API_KEY, "page": 0, "size": 5}
-        r = requests.get(NASA_NEO_URL, params=params, timeout=20)
-        objs = r.json().get("near_earth_objects", [])
-        payload = []
-        for o in objs:
-            el = o.get("orbital_data", {})
-            payload.append({
-                "full_name": o.get("name"),
-                "a": el.get("semi_major_axis", 1),
-                "e": el.get("eccentricity", 0),
-                "i": el.get("inclination", 0),
-                "om": el.get("ascending_node_longitude", 0),
-                "w": el.get("perihelion_argument", 0),
-            })
-        df = pd.DataFrame(payload)
-        results = [compute_orbit_and_impact(r) for _, r in df.iterrows()]
-        return jsonify({"results": [r for r in results if r], "source": "NASA NEO API"})
+        # Load asteroid data from CSV or NASA database
+        csv_path = os.path.join(os.path.dirname(__file__), "resources", "asteroids.csv")
+        df = pd.read_csv(csv_path)
+
+        asteroid_row = None
+        for _, row in df.iterrows():
+            if row.get("full_name") == designation or row.get("des") == designation:
+                asteroid_row = row
+                break
+
+        if asteroid_row is None:
+            return jsonify({"error": "Asteroid not found"}), 404
+
+        # Compute orbital trajectory + impact
+        result = compute_orbit_and_impact(asteroid_row)
+
+        if result:
+            return jsonify({"results": [result], "source": "Simulated Impact"})
+        else:
+            return jsonify({"error": "Failed to simulate impact"}), 500
+
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
-@app.route("/fetch_usgs_quake_equiv", methods=["GET"])
-def fetch_usgs_quake_equiv():
-    """Return recent large earthquakes for comparison."""
-    try:
-        params = {"format": "geojson", "limit": 5, "orderby": "magnitude", "minmagnitude": 6}
-        r = requests.get(USGS_QUAKE_URL, params=params, timeout=20)
-        feats = r.json().get("features", [])
-        quakes = [{"place": f["properties"]["place"], "mag": f["properties"]["mag"]}
-                  for f in feats]
-        return jsonify({"recent_large_quakes": quakes})
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/ping")
-def ping():
-    return {"status": "alive"}, 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)

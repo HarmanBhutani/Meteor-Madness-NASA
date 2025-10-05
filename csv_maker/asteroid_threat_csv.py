@@ -23,13 +23,15 @@ def calculate_diameter(h, albedo=0.14):
         return None
     return round((1329 / (albedo ** 0.5)) * 10 ** (-0.2 * h), 2)
 
-# Step 1 — Get close approaches
+print("🔍 Fetching asteroid close approach data...")
 df = fetch_close_approaches(dist_max=0.05)
+
 if df.empty:
-    print("No close approach data found.")
+    print("⚠ No close approach data found.")
     exit()
 
 asteroid_data = []
+
 for _, row in df.iterrows():
     designation = row["des"]
     moid, h, elements = fetch_orbital_data(designation)
@@ -37,8 +39,8 @@ for _, row in df.iterrows():
 
     if moid is not None and h is not None and moid <= 0.05 and h <= 22:
         asteroid_data.append({
-            "Distance (AU)": row["dist"],
-            "Velocity (km/s)": row["v_rel"],
+            "Distance (AU)": float(row["dist"]),
+            "Velocity (km/s)": float(row["v_rel"]),
             "Diameter (m)": diameter,
             "a (AU)": elements.get("a"),
             "e": elements.get("e"),
@@ -48,9 +50,14 @@ for _, row in df.iterrows():
             "M (deg)": elements.get("ma")
         })
 
-# Step 3 — Save to CSV
-output_df = pd.DataFrame(asteroid_data)
-output_df = output_df.sort_values(by="Distance (AU)")
-output_df.to_csv("potential_threat_asteroids.csv", index=False)
+if asteroid_data:
+    output_df = pd.DataFrame(asteroid_data)
+    print(f"✅ Found {len(output_df)} potentially threatening asteroids.")
 
-print(f"✅ CSV generated: potential_threat_asteroids.csv with {len(output_df)} rows.")
+    if "Distance (AU)" in output_df.columns:
+        output_df = output_df.sort_values(by="Distance (AU)")
+
+    output_df.to_csv("potential_threat_asteroids.csv", index=False)
+    print("📄 CSV generated: potential_threat_asteroids.csv")
+else:
+    print("⚠ No asteroids meet threat criteria.")

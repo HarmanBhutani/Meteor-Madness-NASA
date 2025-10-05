@@ -10,6 +10,7 @@ export default function AsteroidVisualiser3D() {
   const [loading, setLoading] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(null);
   const [asteroidTexture, setAsteroidTexture] = useState(null);
+  const [showImpactInfo, setShowImpactInfo] = useState(false);
 
   const normalizeLng = (lng) => ((lng + 540) % 360) - 180;
 
@@ -46,35 +47,32 @@ export default function AsteroidVisualiser3D() {
     const sel = asteroids.find((a) => a.name === e.target.value);
     setSelectedAsteroid(sel);
     setCurrentPosition(null);
+    setShowImpactInfo(false); // reset when selecting a new asteroid
+
+    if (globeRef.current) {
+      globeRef.current.pointOfView(
+        { lat: 0, lng: 0, altitude: 2.5 }, // zoomed-out view
+        1500
+      );
+    }
   };
 
-  useEffect(() => {
-    if (!selectedAsteroid || selectedAsteroid.orbit.length === 0) return;
+  const simulateImpact = () => {
+    if (!selectedAsteroid || !globeRef.current) return;
     const orbit = selectedAsteroid.orbit;
-    let i = 0;
-    const delay = 100;
-    let last = 0;
-    const animate = (t) => {
-      if (!last || t - last > delay) {
-        setCurrentPosition(orbit[i]);
-        i = (i + 1) % orbit.length;
-        last = t;
-      }
-      requestAnimationFrame(animate);
-    };
-    requestAnimationFrame(animate);
-  }, [selectedAsteroid]);
+    if (!orbit || orbit.length === 0) return;
 
-  useEffect(() => {
-    if (selectedAsteroid?.impact?.impact && globeRef.current) {
-      const { lat, lng } = selectedAsteroid.impact;
-      const normLng = normalizeLng(lng);
-      globeRef.current.controls().autoRotate = false;
-      setTimeout(() => {
-        globeRef.current.pointOfView({ lat, lng: normLng, altitude: 0.25 }, 2500);
-      }, 800);
-    }
-  }, [selectedAsteroid]);
+    const impactPosition = orbit[orbit.length - 1];
+    const normLng = normalizeLng(impactPosition.lng);
+
+    globeRef.current.controls().autoRotate = false;
+    globeRef.current.pointOfView(
+      { lat: impactPosition.lat, lng: normLng, altitude: 0.25 },
+      2500
+    );
+
+    setShowImpactInfo(true); // show impact details
+  };
 
   const makeArcs = (pts, color) =>
     pts.slice(1).map((p, i) => ({
@@ -84,11 +82,11 @@ export default function AsteroidVisualiser3D() {
       endLng: normalizeLng(p.lng),
       color,
     }));
+
   const fullOrbit = selectedAsteroid ? makeArcs(selectedAsteroid.orbit, "gray") : [];
 
   const layers = [];
 
-  // --- Moving asteroid ---
   if (currentPosition && asteroidTexture)
     layers.push({
       lat: currentPosition.lat,
@@ -101,12 +99,10 @@ export default function AsteroidVisualiser3D() {
       })(),
     });
 
-  // --- Impact visualization ---
   if (selectedAsteroid?.impact?.impact) {
     const { lat, lng, population_impacted } = selectedAsteroid.impact;
     const normLng = normalizeLng(lng);
 
-    // Color intensity by impacted population
     let craterColor = "#ffaa00";
     if (population_impacted > 1000000) craterColor = "#ff3300";
     else if (population_impacted > 100000) craterColor = "#ff6600";
@@ -124,11 +120,15 @@ export default function AsteroidVisualiser3D() {
           transparent: true,
           opacity: 0.9,
         });
-        const crater = new THREE.Mesh(geo, mat);
-        return crater;
+        return new THREE.Mesh(geo, mat);
       })(),
     });
   }
+
+  const populationDensity =
+    selectedAsteroid?.impact?.population_impacted && selectedAsteroid?.impact?.population_impacted > 0
+      ? selectedAsteroid.impact.population_impacted / (Math.PI * 100 * 100) // radius assumed = 100 km
+      : null;
 
   return (
     <div style={{ height: "100vh", width: "100vw", background: "#000" }}>
@@ -149,8 +149,6 @@ export default function AsteroidVisualiser3D() {
         }}
       >
         <button onClick={() => fetchData("http://127.0.0.1:8000/load_data")}>Local CSV</button>
-        <button onClick={() => fetchData("http://127.0.0.1:8000/fetch_nasa_neo")}>NASA NEO</button>
-        <button onClick={() => fetchData("http://127.0.0.1:8000/fetch_usgs_quake_equiv")}>USGS Quakes</button>
         <select onChange={handleSelect} style={{ color: "#000" }}>
           <option>Select asteroid</option>
           {asteroids.map((a) => (
@@ -159,6 +157,13 @@ export default function AsteroidVisualiser3D() {
             </option>
           ))}
         </select>
+
+        {selectedAsteroid && (
+          <button onClick={simulateImpact} style={{ background: "#ff3300", color: "#fff" }}>
+            Simulate Impact
+          </button>
+        )}
+
         {loading && <span style={{ color: "yellow" }}>Loading...</span>}
         {error && <span style={{ color: "red" }}>Error: {error}</span>}
       </div>
@@ -178,13 +183,21 @@ export default function AsteroidVisualiser3D() {
             maxWidth: "360px",
           }}
         >
-          <h4>{selectedAsteroid.name}</h4>
-          {selectedAsteroid.impact?.impact ? (
+          {selectedAsteroid.impact?.impact || showImpactInfo ? (
             <>
+              <h4>{selectedAsteroid.name}</h4>
               <p style={{ color: "red" }}>Impact detected at Earth!</p>
+
               <p>
-                <strong>Latitude:</strong> {selectedAsteroid.impact.lat?.toFixed(3)}°<br />
-                <strong>Longitude:</strong> {normalizeLng(selectedAsteroid.impact.lng)?.toFixed(3)}°
+                <strong>Latitude:</strong>{" "}
+                {selectedAsteroid.impact?.lat
+                  ? selectedAsteroid.impact.lat.toFixed(3) + "°"
+                  : "N/A"}
+                <br />
+                <strong>Longitude:</strong>{" "}
+                {selectedAsteroid.impact?.lng
+                  ? normalizeLng(selectedAsteroid.impact.lng).toFixed(3) + "°"
+                  : "N/A"}
               </p>
 
               <p>
@@ -195,32 +208,17 @@ export default function AsteroidVisualiser3D() {
               </p>
 
               <p>
-                <strong>Energy:</strong>{" "}
-                {selectedAsteroid.impact?.energy_tnt_tons
-                  ? selectedAsteroid.impact.energy_tnt_tons.toExponential(3) + " tons TNT"
+                <strong>Population density:</strong>{" "}
+                {populationDensity
+                  ? populationDensity.toFixed(2) + " people/km²"
                   : "N/A"}
               </p>
 
               <p>
-                <strong>Seismic equivalent:</strong>{" "}
-                {selectedAsteroid.impact?.equivalent_magnitude
-                  ? selectedAsteroid.impact.equivalent_magnitude + " Mw"
-                  : "N/A"}
-              </p>
-
-              {/* ✅ Added population stats */}
-              <p>
-                <strong>Population near impact:</strong>{" "}
-                {selectedAsteroid.impact?.population_estimate
-                  ? selectedAsteroid.impact.population_estimate.toLocaleString()
-                  : "Unavailable"}
-              </p>
-
-              <p>
-                <strong>Population impacted (within 100 km):</strong>{" "}
+                <strong>Population impacted:</strong>{" "}
                 {selectedAsteroid.impact?.population_impacted
                   ? selectedAsteroid.impact.population_impacted.toLocaleString()
-                  : "Unavailable"}
+                  : "N/A"}
               </p>
             </>
           ) : (
@@ -229,7 +227,7 @@ export default function AsteroidVisualiser3D() {
         </div>
       )}
 
-      {/* Footer signature */}
+      {/* Footer */}
       <div
         style={{
           position: "absolute",
