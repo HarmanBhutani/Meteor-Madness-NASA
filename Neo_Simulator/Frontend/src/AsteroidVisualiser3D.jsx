@@ -12,7 +12,6 @@ export default function AsteroidVisualiser3D() {
   const [asteroidTexture, setAsteroidTexture] = useState(null);
   const [showImpactInfo, setShowImpactInfo] = useState(false);
   const [impactLocation, setImpactLocation] = useState(null);
-const [showRipple, setShowRipple] = useState(false);
 
 
 
@@ -21,64 +20,7 @@ const [showRipple, setShowRipple] = useState(false);
   useEffect(() => {
     new THREE.TextureLoader().load("/resources/asteroid-icon.png", setAsteroidTexture);
   }, []);
-  useEffect(() => {
-  if (ripples.length === 0 || !globeRef.current) return;
-  const globe = globeRef.current;
-  const scene = globe.scene();
-  if (!scene) return;
-
-  const rippleMeshes = ripples.map((ripple, i) => {
-    const geometry = new THREE.RingGeometry(0.1, 0.11, 64);
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xff3300,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: ripple.opacity,
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-
-    const phi = (90 - ripple.lat) * (Math.PI / 180);
-    const theta = (180 - ripple.lng) * (Math.PI / 180);
-    const r = globeRef.current.getGlobeRadius() * 1.01; // slightly above globe surface
-    mesh.position.x = r * Math.sin(phi) * Math.cos(theta);
-    mesh.position.y = r * Math.cos(phi);
-    mesh.position.z = r * Math.sin(phi) * Math.sin(theta);
-    mesh.lookAt(0, 0, 0);
-    mesh.scale.set(ripple.scale, ripple.scale, ripple.scale);
-
-    scene.add(mesh);
-    return mesh;
-  });
-
-  let animationFrame;
-  const animateRipples = () => {
-    let newRipples = ripples.map((r, i) => ({
-      ...r,
-      scale: r.scale + 0.05,
-      opacity: r.opacity - 0.01,
-    })).filter(r => r.opacity > 0);
-
-    setRipples(newRipples);
-
-    rippleMeshes.forEach((mesh, i) => {
-      if (newRipples[i]) {
-        mesh.scale.set(newRipples[i].scale, newRipples[i].scale, newRipples[i].scale);
-        mesh.material.opacity = newRipples[i].opacity;
-      } else {
-        scene.remove(mesh);
-      }
-    });
-
-    if (newRipples.length > 0) {
-      animationFrame = requestAnimationFrame(animateRipples);
-    }
-  };
-
-  animateRipples();
-
-  return () => cancelAnimationFrame(animationFrame);
-}, [ripples]);
-
+  
 
 
   const fetchData = async (endpoint) => {
@@ -138,7 +80,8 @@ const [showRipple, setShowRipple] = useState(false);
 
   setShowImpactInfo(true);
   setImpactLocation({ lat: impactPosition.lat, lng: normLng });
-  setShowRipple(true);
+
+  
 };
 
   
